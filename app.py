@@ -27,19 +27,25 @@ def get_ceiled_gap(price, percentage):
 @st.cache_data
 def load_data(uploaded_file):
     try:
-        # Detect file type and load accordingly
+        # Explicitly define engines based on file extension
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
+        elif uploaded_file.name.endswith('.xlsx'):
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
+        elif uploaded_file.name.endswith('.xls'):
+            df = pd.read_excel(uploaded_file, engine='xlrd')
         else:
-            # Reads Excel files (.xlsx, .xls)
-            df = pd.read_excel(uploaded_file)
+            # Fallback for weird filenames
+            try:
+                df = pd.read_excel(uploaded_file, engine='openpyxl')
+            except:
+                df = pd.read_csv(uploaded_file)
 
         df.columns = df.columns.str.title() 
         
         cols_to_clean = ['Open', 'High', 'Low', 'Close']
         for col in cols_to_clean:
             if col in df.columns:
-                # Apply cleaning only if the column is object/string type
                 if df[col].dtype == 'object':
                     df[col] = df[col].apply(clean_numeric)
         
@@ -108,7 +114,6 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
                     current_leg = 0
                     qty = lots[current_leg]
                     
-                    # Logic: If continuous mode and not first cycle, use calculated price
                     if next_entry_price and not single_cycle_mode:
                         buy_price = next_entry_price
                         note = "Cycle Restart"
@@ -210,7 +215,6 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
 # 3. FRONTEND UI LAYOUT
 # ==========================================
 
-# --- SIDEBAR: Configuration ---
 with st.sidebar:
     st.header("Configuration")
     
@@ -231,11 +235,9 @@ with st.sidebar:
     lots = [l1, l2, l3, l4, l5]
     gaps = [0, g2, g3, g4, g5]
 
-# --- MAIN PAGE ---
 st.title("Jolly Gold 2 Strategy")
 st.write("Upload your Commodity Data (CSV or Excel) to begin backtesting.")
 
-# Updated to accept xlsx and xls
 uploaded_file = st.file_uploader("Upload Data File", type=['csv', 'xlsx', 'xls'])
 
 if uploaded_file is not None:
