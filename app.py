@@ -27,13 +27,21 @@ def get_ceiled_gap(price, percentage):
 @st.cache_data
 def load_data(uploaded_file):
     try:
-        df = pd.read_csv(uploaded_file)
+        # Detect file type and load accordingly
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            # Reads Excel files (.xlsx, .xls)
+            df = pd.read_excel(uploaded_file)
+
         df.columns = df.columns.str.title() 
         
         cols_to_clean = ['Open', 'High', 'Low', 'Close']
         for col in cols_to_clean:
             if col in df.columns:
-                df[col] = df[col].apply(clean_numeric)
+                # Apply cleaning only if the column is object/string type
+                if df[col].dtype == 'object':
+                    df[col] = df[col].apply(clean_numeric)
         
         df['Date'] = pd.to_datetime(df['Date'])
         
@@ -41,7 +49,7 @@ def load_data(uploaded_file):
         if expiry_col:
             df['Expiry Date'] = pd.to_datetime(df[expiry_col[0]])
         else:
-            st.error("No 'Expiry Date' column found in CSV!")
+            st.error("No 'Expiry Date' column found in file!")
             return None
 
         df = df.sort_values('Date', ascending=True).reset_index(drop=True)
@@ -184,19 +192,15 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
                 'Profit': cycle_res['pnl']
             })
             
-            # If Single Mode, STOP here
             if single_cycle_mode:
                 break
 
-            # Prepare next loop (Continuous Mode)
             current_idx = cycle_res['end_idx']
             next_entry_price = cycle_res['exit_price'] + 5
             
-            # Skip forward if today is expiry to avoid loop
             if df.iloc[current_idx]['Date'] >= df.iloc[current_idx]['Expiry Date']:
                 current_idx += 1
         else:
-            # Data ran out
             break
             
     progress_bar.empty()
@@ -229,9 +233,10 @@ with st.sidebar:
 
 # --- MAIN PAGE ---
 st.title("Jolly Gold 2 Strategy")
-st.write("Upload your Commodity Data (CSV) to begin backtesting.")
+st.write("Upload your Commodity Data (CSV or Excel) to begin backtesting.")
 
-uploaded_file = st.file_uploader("Upload CSV File", type=['csv'])
+# Updated to accept xlsx and xls
+uploaded_file = st.file_uploader("Upload Data File", type=['csv', 'xlsx', 'xls'])
 
 if uploaded_file is not None:
     df = load_data(uploaded_file)
@@ -240,7 +245,6 @@ if uploaded_file is not None:
         st.divider()
         st.subheader("Simulation Settings")
         
-        # Mode Selection
         mode = st.radio("Select Mode", ["Single Cycle", "Continuous Backtest"])
         
         min_date = df['Date'].min().date()
@@ -248,20 +252,16 @@ if uploaded_file is not None:
         
         start_date = st.date_input("Start Date", min_date, min_value=min_date, max_value=max_date)
         
-        end_date = max_date # Default
+        end_date = max_date 
         if mode == "Continuous Backtest":
             end_date = st.date_input("End Date", max_date, min_value=min_date, max_value=max_date)
         
         if st.button("Run Simulation", type="primary"):
-            
-            # Determine flags
             is_single = (mode == "Single Cycle")
             
-            # Run Logic
             ledger_df, summary_df, total_pnl = run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=is_single)
             
             if not summary_df.empty:
-                # --- DASHBOARD METRICS ---
                 st.divider()
                 st.subheader("Results")
                 m1, m2, m3, m4 = st.columns(4)
@@ -275,7 +275,6 @@ if uploaded_file is not None:
                 avg_trade = total_pnl / len(summary_df)
                 m4.metric("Avg Profit/Cycle", f"{avg_trade:,.2f}")
                 
-                # --- CHARTS (Only for Continuous) ---
                 if not is_single:
                     st.subheader("Cumulative Profit Curve")
                     summary_df['Cumulative PnL'] = summary_df['Profit'].cumsum()
@@ -290,7 +289,6 @@ if uploaded_file is not None:
                     ))
                     st.plotly_chart(fig, use_container_width=True)
                 
-                # --- DATA TABS ---
                 tab1, tab2 = st.tabs(["Cycle Summary", "Detailed Ledger"])
                 
                 with tab1:
@@ -298,8 +296,6 @@ if uploaded_file is not None:
                 
                 with tab2:
                     st.dataframe(ledger_df.style.format({"Price": "{:,.2f}", "AvgPrice": "{:,.2f}", "Profit": "{:,.2f}"}), use_container_width=True)
-                    
-                    # Download Button
                     csv = ledger_df.to_csv(index=False).encode('utf-8')
                     st.download_button("Download Full Ledger CSV", data=csv, file_name="jolly_gold_results.csv", mime='text/csv')
             
