@@ -26,70 +26,98 @@ def get_ceiled_gap(price, percentage):
     return math.ceil(gap_val / 100) * 100
 
 @st.cache_data
-def load_data(uploaded_file):
+def load_data(uploaded_files):
+    # Ensure input is a list for consistent looping
+    if not isinstance(uploaded_files, list):
+        uploaded_files = [uploaded_files]
+        
+    all_dfs = []
+    
+    for uploaded_file in uploaded_files:
+        try:
+            filename = uploaded_file.name.lower()
+            temp_dfs = []
+
+            # --- A. EXCEL HANDLING (MULTI-SHEET) ---
+            if filename.endswith('.xlsx'):
+                # sheet_name=None reads ALL sheets as a dictionary
+                xls_data = pd.read_excel(uploaded_file, engine='openpyxl', sheet_name=None)
+                temp_dfs.extend(xls_data.values()) # Add all sheets to our list
+
+            elif filename.endswith('.xls'):
+                try:
+                    xls_data = pd.read_excel(uploaded_file, engine='xlrd', sheet_name=None)
+                    temp_dfs.extend(xls_data.values())
+                except Exception:
+                    # Fallback for "Fake" XLS (HTML)
+                    uploaded_file.seek(0)
+                    tables = pd.read_html(uploaded_file)
+                    temp_dfs.extend(tables)
+
+            # --- B. CSV HANDLING ---
+            elif filename.endswith('.csv'):
+                temp_dfs.append(pd.read_csv(uploaded_file))
+
+            # --- C. PRE-CLEAN & APPEND ---
+            for df in temp_dfs:
+                # Standardize columns before merging
+                df.columns = df.columns.str.title().str.strip()
+                all_dfs.append(df)
+
+        except Exception as e:
+            st.error(f"Error reading file {uploaded_file.name}: {e}")
+            continue
+
+    if not all_dfs:
+        return None
+
+    # --- MERGE ALL DATA ---
     try:
-        filename = uploaded_file.name.lower()
-        
-        # --- 1. FILE LOADING ---
-        if filename.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        elif filename.endswith('.xlsx'):
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
-        elif filename.endswith('.xls'):
-            try:
-                df = pd.read_excel(uploaded_file, engine='xlrd')
-            except Exception:
-                uploaded_file.seek(0)
-                tables = pd.read_html(uploaded_file)
-                if tables:
-                    df = tables[0]
-                else:
-                    st.error("Could not find data in the HTML/XLS file.")
-                    return None
-        
-        # --- 2. CLEANING COLUMNS ---
-        df.columns = df.columns.str.title().str.strip()
-        
+        full_df = pd.concat(all_dfs, ignore_index=True)
+    except ValueError:
+        st.error("No valid data found in uploaded files.")
+        return None
+
+    # --- CLEAN MERGED DATA ---
+    try:
+        # Numeric Conversion
         cols_to_clean = ['Open', 'High', 'Low', 'Close']
         for col in cols_to_clean:
-            if col in df.columns:
-                if df[col].dtype == 'object':
-                    df[col] = df[col].apply(clean_numeric)
+            if col in full_df.columns and full_df[col].dtype == 'object':
+                full_df[col] = full_df[col].apply(clean_numeric)
         
-        # --- 3. ROBUST DATE PARSING ---
-        if 'Date' in df.columns:
-            df['Date'] = df['Date'].astype(str).str.strip()
-            try:
-                df['Date'] = pd.to_datetime(df['Date'], format='%d %b %Y', errors='raise')
-            except ValueError:
-                df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
+        # Date Parsing
+        if 'Date' in full_df.columns:
+            full_df['Date'] = full_df['Date'].astype(str).str.strip()
             
-            df = df.dropna(subset=['Date'])
-            if df.empty:
-                st.error("All dates failed to parse.")
-                return None
+            # 1. Try MCX Format (30 Apr 2021)
+            # 2. Try Standard (dayfirst=True)
+            # 3. Coerce errors to NaT
+            full_df['Date'] = pd.to_datetime(full_df['Date'], format='%d %b %Y', errors='coerce') \
+                              .fillna(pd.to_datetime(full_df['Date'], dayfirst=True, errors='coerce'))
+            
+            full_df = full_df.dropna(subset=['Date'])
         else:
-            st.error("Column 'Date' not found.")
+            st.error("Column 'Date' not found in combined data.")
             return None
 
-        # --- 4. EXPIRY DATE PARSING ---
-        expiry_col = [c for c in df.columns if 'Expiry' in c]
+        # Expiry Parsing
+        expiry_col = [c for c in full_df.columns if 'Expiry' in c]
         if expiry_col:
             col_name = expiry_col[0]
-            try:
-                df['Expiry Date'] = pd.to_datetime(df[col_name], format='%d%b%Y', errors='raise')
-            except ValueError:
-                 df['Expiry Date'] = pd.to_datetime(df[col_name], dayfirst=True, errors='coerce')
-            df = df.dropna(subset=['Expiry Date'])
+            full_df['Expiry Date'] = pd.to_datetime(full_df[col_name], format='%d%b%Y', errors='coerce') \
+                                     .fillna(pd.to_datetime(full_df[col_name], dayfirst=True, errors='coerce'))
+            full_df = full_df.dropna(subset=['Expiry Date'])
         else:
             st.error("No 'Expiry Date' column found!")
             return None
 
-        df = df.sort_values('Date', ascending=True).reset_index(drop=True)
-        return df
+        # Final Sort
+        full_df = full_df.sort_values('Date', ascending=True).reset_index(drop=True)
+        return full_df
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"Error processing combined data: {e}")
         return None
 
 def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False):
@@ -105,7 +133,7 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
     total_profit = 0
     cycle_count = 0
     next_entry_price = None
-    max_legs = len(lots) # Dynamic leg count
+    max_legs = len(lots) 
     
     progress_bar = st.progress(0)
     
@@ -182,7 +210,7 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
                 cycle_res = {'end_idx': original_idx, 'pnl': pnl, 'reason': status, 'exit_price': exit_p}
                 break
                 
-            # NEXT LEGS (Dynamic Check)
+            # NEXT LEGS
             if current_leg < (max_legs - 1):
                 next_leg = current_leg + 1
                 gap_pct = gaps[next_leg]
@@ -194,7 +222,6 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
                     buy_price = open_p if open_p < trigger else trigger
                     qty = lots[next_leg]
                     
-                    # Update Avg Price
                     total_cost = (avg_price * total_lots) + (qty * buy_price)
                     total_lots += qty
                     avg_price = total_cost / total_lots
@@ -242,31 +269,24 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
 with st.sidebar:
     st.header("Configuration")
     
-    # --- 1. Dynamic Legs Selection ---
     num_legs = st.number_input("Number of Legs", min_value=1, max_value=20, value=5)
     
     lots = []
     gaps = []
     
     st.subheader("Leg Settings")
-    
-    # Generate Inputs Loop
     for i in range(num_legs):
         c1, c2 = st.columns(2)
         with c1:
-            # Default value logic: 6 for leg 1, then alternating 4/6 roughly based on user's old pattern
             def_lot = 6
             if i == 1: def_lot = 4
-            
             l = st.number_input(f"Leg {i+1} Lots", value=def_lot, min_value=1, key=f"lot_{i}")
             lots.append(l)
-            
         with c2:
             if i == 0:
                 st.caption("Gap: 0% (Start)")
                 gaps.append(0.0)
             else:
-                # Default gap logic: 0.5% increments approx
                 def_gap = 1.0 + (0.5 * (i-1))
                 g = st.number_input(f"Gap Leg {i+1} (%)", value=def_gap, step=0.1, min_value=0.0, key=f"gap_{i}")
                 gaps.append(g)
@@ -274,12 +294,14 @@ with st.sidebar:
 st.title("Jolly Gold 2 Strategy")
 st.write("Upload your Commodity Data (CSV, Excel) to begin.")
 
-uploaded_file = st.file_uploader("Upload Data File", type=['csv', 'xlsx', 'xls'])
+# UPDATED: accept_multiple_files=True allows drag & dropping many files
+uploaded_files = st.file_uploader("Upload Data File(s)", type=['csv', 'xlsx', 'xls'], accept_multiple_files=True)
 
-if uploaded_file is not None:
-    df = load_data(uploaded_file)
+if uploaded_files:
+    df = load_data(uploaded_files)
     
     if df is not None:
+        st.success(f"Loaded {len(df)} rows. Date Range: {df['Date'].min().date()} to {df['Date'].max().date()}")
         st.divider()
         st.subheader("Simulation Settings")
         
@@ -303,7 +325,6 @@ if uploaded_file is not None:
                 st.divider()
                 st.subheader("Results")
                 
-                # --- METRICS ---
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Total Profit", f"{total_pnl:,.2f}")
                 m2.metric("Total Cycles", len(summary_df))
@@ -316,11 +337,9 @@ if uploaded_file is not None:
                 m4.metric("Avg Profit/Cycle", f"{avg_trade:,.2f}")
                 
                 # --- VISUALIZATION ---
-                # Calculate Cumulative PnL for table and chart
                 summary_df['Cumulative PnL'] = summary_df['Profit'].cumsum()
                 
                 if not is_single:
-                    # CHART 1: EQUITY CURVE
                     st.subheader("1. Equity Curve")
                     fig_eq = go.Figure()
                     
@@ -345,7 +364,6 @@ if uploaded_file is not None:
                     fig_eq.update_layout(showlegend=False, xaxis_title="Date", yaxis_title="Cumulative PnL")
                     st.plotly_chart(fig_eq, use_container_width=True)
 
-                    # CHART 2: PROFIT PER CYCLE
                     st.subheader("2. Profit/Loss per Cycle")
                     fig_bar = go.Figure()
                     bar_colors = ['#00CC96' if val >= 0 else '#EF553B' for val in summary_df['Profit']]
@@ -363,7 +381,6 @@ if uploaded_file is not None:
                 tab1, tab2 = st.tabs(["Cycle Summary", "Detailed Ledger"])
                 
                 with tab1:
-                    # Format Cumulative PnL to 2 decimals
                     st.dataframe(summary_df.style.format({
                         "Profit": "{:,.2f}", 
                         "Cumulative PnL": "{:,.2f}"
