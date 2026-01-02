@@ -51,34 +51,45 @@ def load_data(uploaded_file):
                     return None
         
         # --- 2. CLEANING COLUMNS ---
-        # Standardize columns to Title Case (Open, High, Low...)
         df.columns = df.columns.str.title().str.strip()
         
-        # Identify Price Columns and convert to float
         cols_to_clean = ['Open', 'High', 'Low', 'Close']
         for col in cols_to_clean:
             if col in df.columns:
                 if df[col].dtype == 'object':
                     df[col] = df[col].apply(clean_numeric)
         
-        # --- 3. ROBUST DATE PARSING (THE FIX) ---
+        # --- 3. FIX: SPECIFIC DATE PARSING FOR MCX FORMAT ---
         if 'Date' in df.columns:
-            # "coerce" turns invalid dates into NaT (Not a Time) so it doesn't crash
-            # "dayfirst=True" helps with formats like 01/02/2021 being Jan 2nd, not Feb 1st
-            df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
+            # Clean strings first
+            df['Date'] = df['Date'].astype(str).str.strip()
             
-            # Drop rows where Date failed to parse
+            # Try MCX Format first: "30 Apr 2021"
+            try:
+                df['Date'] = pd.to_datetime(df['Date'], format='%d %b %Y', errors='raise')
+            except ValueError:
+                # If that fails, try standard formats
+                df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
+            
             df = df.dropna(subset=['Date'])
+            
+            if df.empty:
+                st.error("All dates failed to parse. Please check your Date column format.")
+                return None
         else:
             st.error("Column 'Date' not found. Please check file headers.")
             return None
 
-        # --- 4. ROBUST EXPIRY DATE PARSING ---
+        # --- 4. EXPIRY DATE PARSING ---
         expiry_col = [c for c in df.columns if 'Expiry' in c]
         if expiry_col:
             col_name = expiry_col[0]
-            df['Expiry Date'] = pd.to_datetime(df[col_name], dayfirst=True, errors='coerce')
-             # Fill missing expiries or drop them if critical
+            # Try MCX Expiry Format: "05May2021"
+            try:
+                df['Expiry Date'] = pd.to_datetime(df[col_name], format='%d%b%Y', errors='raise')
+            except ValueError:
+                 df['Expiry Date'] = pd.to_datetime(df[col_name], dayfirst=True, errors='coerce')
+                 
             df = df.dropna(subset=['Expiry Date'])
         else:
             st.error("No 'Expiry Date' column found in file!")
