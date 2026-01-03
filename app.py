@@ -8,7 +8,7 @@ from dateutil.relativedelta import relativedelta
 # 1. PAGE CONFIGURATION
 # ==========================================
 st.set_page_config(
-    page_title="Jolly Gold 2 Strategy",
+    page_title="Systematic Strategy Backtester",
     layout="wide"
 )
 
@@ -81,13 +81,13 @@ def load_data(uploaded_files):
             # Priority 1: ISO Format (2025-10-03)
             iso_dates = pd.to_datetime(full_df['Date'], format='%Y-%m-%d', errors='coerce')
             
-            # Priority 2: MCX Format (30 Apr 2021)
-            mcx_dates = pd.to_datetime(full_df['Date'], format='%d %b %Y', errors='coerce')
+            # Priority 2: Standard Format (30 Apr 2021)
+            std_dates = pd.to_datetime(full_df['Date'], format='%d %b %Y', errors='coerce')
             
             # Priority 3: Standard Fallback
             fallback_dates = pd.to_datetime(full_df['Date'], dayfirst=True, errors='coerce')
             
-            full_df['Date'] = iso_dates.fillna(mcx_dates).fillna(fallback_dates)
+            full_df['Date'] = iso_dates.fillna(std_dates).fillna(fallback_dates)
             full_df = full_df.dropna(subset=['Date'])
         else:
             return None
@@ -99,10 +99,10 @@ def load_data(uploaded_files):
             full_df[col_name] = full_df[col_name].astype(str).str.strip()
             
             iso_exp = pd.to_datetime(full_df[col_name], format='%Y-%m-%d', errors='coerce')
-            mcx_exp = pd.to_datetime(full_df[col_name], format='%d%b%Y', errors='coerce')
+            std_exp = pd.to_datetime(full_df[col_name], format='%d%b%Y', errors='coerce')
             fallback_exp = pd.to_datetime(full_df[col_name], dayfirst=True, errors='coerce')
             
-            full_df['Expiry Date'] = iso_exp.fillna(mcx_exp).fillna(fallback_exp)
+            full_df['Expiry Date'] = iso_exp.fillna(std_exp).fillna(fallback_exp)
             full_df = full_df.dropna(subset=['Expiry Date'])
         else:
             return None
@@ -116,7 +116,9 @@ def load_data(uploaded_files):
         return None
 
 def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False):
+    # Filter Date Range
     mask = (df['Date'] >= pd.to_datetime(start_date)) & (df['Date'] <= pd.to_datetime(end_date))
+    # Group by Date to handle multiple expiries per day
     daily_groups = {k: v for k, v in df[mask].groupby('Date')}
     unique_dates = sorted(daily_groups.keys())
     
@@ -127,7 +129,7 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
     next_entry_price = None
     max_legs = len(lots)
     
-    # 10x Margin/Multiplier for GOLDM (100g lot / 10g quote)
+    # 10x Margin/Multiplier
     MULTIPLIER = 10 
     
     position_open = False
@@ -190,11 +192,12 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
         # 2. MANAGE POSITION (Locked Expiry Only)
         # ==========================================
         else:
+            # Filter for the SPECIFIC locked expiry
             row_data = todays_contracts[todays_contracts['Expiry Date'] == active_expiry]
             
             if row_data.empty:
+                # Force close if contract expired/missing and date passed
                 if current_date > active_expiry:
-                     # Force Close
                      grand_ledger.extend(cycle_ledger)
                      cycle_count += 1
                      cycle_summaries.append({
@@ -326,7 +329,7 @@ with st.sidebar:
                 g = st.number_input(f"Gap Leg {i+1} (%)", value=def_gap, step=0.1, min_value=0.0, key=f"gap_{i}")
                 gaps.append(g)
 
-st.title("Jolly Gold 2 Strategy")
+st.title("Systematic Strategy Backtester")
 st.write("Upload your Commodity Data (CSV, Excel) to begin.")
 
 uploaded_files = st.file_uploader("Upload Data File(s)", type=['csv', 'xlsx', 'xls'], accept_multiple_files=True)
@@ -428,7 +431,7 @@ if uploaded_files:
                     }), use_container_width=True)
                     
                     csv = ledger_df.to_csv(index=False).encode('utf-8')
-                    st.download_button("Download Full Ledger CSV", data=csv, file_name="jolly_gold_results.csv", mime='text/csv')
+                    st.download_button("Download Full Ledger CSV", data=csv, file_name="strategy_results.csv", mime='text/csv')
             
             else:
                 st.warning("No cycles completed. This often happens if required expiry contracts are missing from the data.")

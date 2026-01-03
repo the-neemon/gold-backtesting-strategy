@@ -1,6 +1,6 @@
-# Jolly Gold 2 Strategy Backtester
+# Systematic Strategy Backtester
 
-A Python-based web application for backtesting a multi-leg averaging strategy on Indian Commodity Market (MCX) data. This tool allows traders to simulate systematic strategies, visualize equity curves, and analyze trade-by-trade performance using a user-friendly interface.
+A Python-based web application for backtesting a multi-leg averaging strategy on commodity market data. This tool allows traders to simulate systematic strategies, visualize equity curves, and analyze trade-by-trade performance using a user-friendly interface.
 
 ## Overview
 
@@ -40,39 +40,6 @@ The system simulates a trading strategy that averages down into a position using
     * If High $\ge$ Avg Price: Exit at Avg Price (No Profit/No Loss).
     * If High $<$ Avg Price: Exit at Close Price (Realize Loss).
 
-## Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone [https://github.com/your-username/jolly-gold-backtester.git](https://github.com/your-username/jolly-gold-backtester.git)
-    cd jolly-gold-backtester
-    ```
-
-2.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-    *Contents of `requirements.txt`:*
-    ```text
-    streamlit
-    pandas
-    plotly
-    openpyxl
-    xlrd
-    lxml
-    ```
-
-## Usage
-
-1.  **Run the application:**
-    ```bash
-    streamlit run app.py
-    ```
-2.  **Open your browser:** The app will typically run at `http://localhost:8501`.
-3.  **Upload Data:** Upload your MCX Bhavcopy file (CSV/Excel).
-4.  **Configure:** Set your Lot sizes and Gap percentages in the sidebar.
-5.  **Run:** Click "Run Simulation".
 
 ## Data Format
 
@@ -81,7 +48,3 @@ The application expects a file with the following columns (names are flexible/ca
 * `Date`: Trading date (e.g., "30 Apr 2021").
 * `Expiry Date`: Contract expiry date (e.g., "05May2021").
 * `Open`, `High`, `Low`, `Close`: Price data.
-
-## License
-
-This project is provided for educational and research purposes. Past performance in backtesting does not guarantee future results.
