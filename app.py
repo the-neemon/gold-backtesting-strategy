@@ -3,7 +3,6 @@ import pandas as pd
 import math
 import plotly.graph_objects as go
 from dateutil.relativedelta import relativedelta
-import io
 
 # ==========================================
 # 1. PAGE CONFIGURATION
@@ -82,13 +81,13 @@ def load_data(uploaded_files):
             # Priority 1: ISO Format (2025-10-03)
             iso_dates = pd.to_datetime(full_df['Date'], format='%Y-%m-%d', errors='coerce')
             
-            # Priority 2: Standard Format (30 Apr 2021)
-            std_dates = pd.to_datetime(full_df['Date'], format='%d %b %Y', errors='coerce')
+            # Priority 2: MCX Format (30 Apr 2021)
+            mcx_dates = pd.to_datetime(full_df['Date'], format='%d %b %Y', errors='coerce')
             
             # Priority 3: Standard Fallback
             fallback_dates = pd.to_datetime(full_df['Date'], dayfirst=True, errors='coerce')
             
-            full_df['Date'] = iso_dates.fillna(std_dates).fillna(fallback_dates)
+            full_df['Date'] = iso_dates.fillna(mcx_dates).fillna(fallback_dates)
             full_df = full_df.dropna(subset=['Date'])
         else:
             return None
@@ -100,10 +99,10 @@ def load_data(uploaded_files):
             full_df[col_name] = full_df[col_name].astype(str).str.strip()
             
             iso_exp = pd.to_datetime(full_df[col_name], format='%Y-%m-%d', errors='coerce')
-            std_exp = pd.to_datetime(full_df[col_name], format='%d%b%Y', errors='coerce')
+            mcx_exp = pd.to_datetime(full_df[col_name], format='%d%b%Y', errors='coerce')
             fallback_exp = pd.to_datetime(full_df[col_name], dayfirst=True, errors='coerce')
             
-            full_df['Expiry Date'] = iso_exp.fillna(std_exp).fillna(fallback_exp)
+            full_df['Expiry Date'] = iso_exp.fillna(mcx_exp).fillna(fallback_exp)
             full_df = full_df.dropna(subset=['Expiry Date'])
         else:
             return None
@@ -302,12 +301,6 @@ def run_simulation(df, start_date, end_date, lots, gaps, single_cycle_mode=False
     
     return ledger_df, summary_df, total_profit
 
-def to_excel(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sheet1')
-    return output.getvalue()
-
 # ==========================================
 # 3. FRONTEND UI LAYOUT
 # ==========================================
@@ -351,15 +344,8 @@ if uploaded_files:
         st.subheader("Simulation Settings")
         
         mode = st.radio("Select Mode", ["Single Cycle", "Continuous Backtest"])
-        
-        min_date = df['Date'].min().date()
-        max_date = df['Date'].max().date()
-        
-        start_date = st.date_input("Start Date", min_date, min_value=min_date, max_value=max_date)
-        
-        end_date = max_date 
-        if mode == "Continuous Backtest":
-            end_date = st.date_input("End Date", max_date, min_value=min_date, max_value=max_date)
+        start_date = st.date_input("Start Date", df['Date'].min().date())
+        end_date = st.date_input("End Date", df['Date'].max().date())
         
         if st.button("Run Simulation", type="primary"):
             is_single = (mode == "Single Cycle")
@@ -414,12 +400,12 @@ if uploaded_files:
                     bar_colors = ['#00CC96' if val >= 0 else '#EF553B' for val in summary_df['Profit']]
                     
                     fig_bar.add_trace(go.Bar(
-                        x=summary_df['Cycle'],  # <--- REVERTED TO CYCLE NUMBER
+                        x=summary_df['Cycle'],
                         y=summary_df['Profit'],
                         marker_color=bar_colors,
                         name="Cycle PnL"
                     ))
-                    fig_bar.update_layout(xaxis_title="Cycle #", yaxis_title="Profit/Loss") # <--- REVERTED TITLE
+                    fig_bar.update_layout(xaxis_title="Cycle #", yaxis_title="Profit/Loss")
                     st.plotly_chart(fig_bar, use_container_width=True, config={'toImageButtonOptions': {'filename': 'profit_loss_cycles'}})
                 
                 # --- DATA TABLES ---
@@ -428,14 +414,14 @@ if uploaded_files:
                 with tab1:
                     st.dataframe(summary_df.style.format({"Profit": "{:,.2f}", "Cumulative PnL": "{:,.2f}"}), use_container_width=True)
                     if not summary_df.empty:
-                        data_xlsx = to_excel(summary_df)
-                        st.download_button(label="Download Cycle Summary (Excel)", data=data_xlsx, file_name="strategy_summary.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        csv = summary_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(label="Download Cycle Summary CSV", data=csv, file_name="strategy_summary.csv", mime="text/csv")
                 
                 with tab2:
                     st.dataframe(ledger_df.style.format({"Price": "{:,.2f}", "AvgPrice": "{:,.2f}", "Profit": "{:,.2f}"}), use_container_width=True)
                     if not ledger_df.empty:
-                        data_xlsx = to_excel(ledger_df)
-                        st.download_button(label="Download Detailed Ledger (Excel)", data=data_xlsx, file_name="strategy_ledger.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                        csv = ledger_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(label="Download Detailed Ledger CSV", data=csv, file_name="strategy_ledger.csv", mime="text/csv")
             
             else:
                 st.warning("No cycles completed. This often happens if required expiry contracts are missing from the data.")
