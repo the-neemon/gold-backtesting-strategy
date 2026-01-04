@@ -3,6 +3,7 @@ import pandas as pd
 import math
 import plotly.graph_objects as go
 from dateutil.relativedelta import relativedelta
+import io
 
 # ==========================================
 # 1. PAGE CONFIGURATION
@@ -401,7 +402,6 @@ if uploaded_files:
                     fig_eq.add_hline(y=0, line_dash="dash", line_color="gray")
                     fig_eq.update_layout(showlegend=False, xaxis_title="Date", yaxis_title="Cumulative PnL")
                     
-                    # UPDATED CHART CONFIG
                     st.plotly_chart(
                         fig_eq, 
                         use_container_width=True,
@@ -421,15 +421,21 @@ if uploaded_files:
                     fig_bar = go.Figure()
                     bar_colors = ['#00CC96' if val >= 0 else '#EF553B' for val in summary_df['Profit']]
                     
+                    # UPDATED: Use 'Cycle' for X-axis
                     fig_bar.add_trace(go.Bar(
-                        x=summary_df['End Date'], # X-axis is now Date
+                        x=summary_df['Cycle'], 
                         y=summary_df['Profit'],
                         marker_color=bar_colors,
                         name="Cycle PnL"
                     ))
-                    fig_bar.update_layout(xaxis_title="Date", yaxis_title="Profit/Loss")
                     
-                    # UPDATED CHART CONFIG
+                    # Ensure X-axis shows all cycle numbers as integers
+                    fig_bar.update_layout(
+                        xaxis_title="Cycle Number", 
+                        yaxis_title="Profit/Loss",
+                        xaxis=dict(dtick=1) # Force integer ticks
+                    )
+                    
                     st.plotly_chart(
                         fig_bar, 
                         use_container_width=True,
@@ -453,6 +459,18 @@ if uploaded_files:
                         "Profit": "{:,.2f}", 
                         "Cumulative PnL": "{:,.2f}"
                     }), use_container_width=True)
+                    
+                    # UPDATED: Excel Download for Summary
+                    buffer_summ = io.BytesIO()
+                    with pd.ExcelWriter(buffer_summ, engine='xlsxwriter') as writer:
+                        summary_df.to_excel(writer, index=False, sheet_name='Cycle Summary')
+                        
+                    st.download_button(
+                        label="Download Cycle Summary (Excel)",
+                        data=buffer_summ.getvalue(),
+                        file_name="cycle_summary.xlsx",
+                        mime="application/vnd.ms-excel"
+                    )
                 
                 with tab2:
                     st.dataframe(ledger_df.style.format({
@@ -461,8 +479,17 @@ if uploaded_files:
                         "Profit": "{:,.2f}"
                     }), use_container_width=True)
                     
-                    csv = ledger_df.to_csv(index=False).encode('utf-8')
-                    st.download_button("Download Full Ledger CSV", data=csv, file_name="strategy_results.csv", mime='text/csv')
+                    # UPDATED: Excel Download for Ledger
+                    buffer_ledg = io.BytesIO()
+                    with pd.ExcelWriter(buffer_ledg, engine='xlsxwriter') as writer:
+                        ledger_df.to_excel(writer, index=False, sheet_name='Detailed Ledger')
+
+                    st.download_button(
+                        label="Download Detailed Ledger (Excel)", 
+                        data=buffer_ledg.getvalue(), 
+                        file_name="detailed_ledger.xlsx", 
+                        mime='application/vnd.ms-excel'
+                    )
             
             else:
                 st.warning("No cycles completed. This often happens if required expiry contracts are missing from the data.")
